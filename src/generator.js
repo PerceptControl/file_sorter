@@ -25,10 +25,10 @@ function getString(maxSize) {
  * @param {object} config
  * @param {(rs: fs.WriteStream) => void} cb
  */
-function generator(config = null, cb) {
-  if (!config) config = require('/config/generator.json')
+function generator(config, cb) {
+  if (!config) config = require('/config/base.json')
   if (!config.path) config.path = '/dst'
-  if (!config.name || !config.sizeInMb) throw Error('wrong config')
+  if (!config.name || !config.generator.sizeInMb) throw Error('wrong config')
 
   const computedPath = path.join(config.path, config.name)
   const wstream = fs.createWriteStream(computedPath, {
@@ -39,7 +39,7 @@ function generator(config = null, cb) {
 
   wstream.on('ready', async () => {
     let writed = 0
-    let targetFileSize = config.sizeInMb * BYTES_IN_MB
+    let targetFileSize = config.generator.sizeInMb * BYTES_IN_MB
     while (writed < targetFileSize) {
       let channelCap = BYTES_IN_100MB - wstream.writableLength
 
@@ -60,4 +60,6 @@ function generator(config = null, cb) {
     })
   })
 }
-generator()
+
+module.exports = generator
+if ((process.env.EXEC = true)) generator()
