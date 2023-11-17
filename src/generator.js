@@ -62,4 +62,10 @@ function generator(config, cb) {
 }
 
 module.exports = generator
-if ((process.env.EXEC = true)) generator()
+if (process.env.EXEC) generator()
+if (process.env.DEBUG) {
+  console.log('Process RAM: ', process.constrainedMemory() / 1024 ** 2, 'Mb')
+  console.log('Process mem: ', process.memoryUsage())
+  console.log('Abailable RAM: ', require('node:os').freemem() / 1024 ** 2, 'Mb')
+  console.log('Total RAM: ', require('node:os').totalmem() / 1024 ** 2, 'Mb')
+}

@@ -1,6 +1,6 @@
 FROM node:lts
 
-ENV MAIN=true
+ENV EXEC=true
 VOLUME /config
 VOLUME /dst
 

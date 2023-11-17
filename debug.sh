@@ -14,4 +14,4 @@ else
   OUTPUT=$2;
 fi
 
-docker run -m=500m -v $CONFIG_PATH:/config -v $OUTPUT:/dst perceptioncontrol/sorter
+docker run -m=500m -e "DEBUG=true" -v $CONFIG_PATH:/config -v $OUTPUT:/dst perceptioncontrol/sorter
