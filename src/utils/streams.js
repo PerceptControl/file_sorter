@@ -1,65 +1,50 @@
 const fs = require('node:fs')
 const readline = require('node:readline')
+const events = require('node:events')
 
 const { min } = require('./math')
 
 const BYTES_IN_MB = 1024 ** 2
-const computedStreamCap = 0.5 * process.memoryUsage.rss()
+const computedStreamCap = 0.8 * process.memoryUsage.rss()
 const maxStreamCap = 100 * BYTES_IN_MB
-const STREAM_CAP = min(computedStreamCap, maxStreamCap)
+const STREAM_CAP = Math.floor(min(computedStreamCap, maxStreamCap))
+if (process.env.DEBUG) {
+  console.group('Process cap')
+  console.log('Computed: ', computedStreamCap)
+  console.log('Actual: ', STREAM_CAP)
+  console.groupEnd('Process cap')
+}
 
 /**
  *
  * @param {string} path
- * @param {{(path: string, lines: [string, number][]) => void}} cb
+ * @param {{(path: string, lines: [string, number][]) => Promise<void>}} cb
  */
-async function readLinesLength(path, cb) {
-  if (!path || typeof path != 'string') throw Error('wrong path')
+function readLinesLength(path) {
+  return new Promise((resolve, reject) => {
+    if (!path || typeof path != 'string') reject(new Error('wrong path'))
+    fs.promises.access(path).then(() => {
+      const rstream = fs.createReadStream(path, {
+        //создаем поток с динамичной пропускной способностью
+        highWaterMark: STREAM_CAP,
+      })
 
-  try {
-    await fs.promises.access(path)
+      /**
+       * @type {[string, number][]}
+       */
+      let currentLinePosition = 0
+      const lines = []
+      const rl = readline.createInterface(rstream)
 
-    const rstream = fs.createReadStream(path, {
-      //создаем поток с динамичной пропускной способностью
-      highWaterMark: STREAM_CAP,
-    })
-
-    /**
-     * @type {[string, number][]}
-     */
-    let currentLinePosition = 0
-    const lines = []
-    const rl = readline.createInterface(rstream)
-
-    rl.on('line', async (line) => {
-      currentLinePosition++
-      lines.push([line.length, currentLinePosition])
-    }).on('close', async () => {
-      cb(lines)
-    })
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-async function readLine(path, targetPosition, cb) {
-  if (!path || typeof path != 'string') throw Error('wrong path')
-  return new Promise((resolve) => {
-    const rstream = fs.createReadStream(path, {
-      encoding: 'utf-8',
-    })
-    const rl = readline.createInterface(rstream)
-    let currentPosition = 1
-    let currentString = null
-
-    rl.on('line', async (line) => {
-      if (currentPosition != targetPosition) return currentPosition++
-      currentString = line
-      rl.close()
-    }).on('close', async () => {
-      if (currentString) cb(currentString, resolve)
-      resolve()
-    })
+      rl.on('line', (line) => {
+        line.trim()
+        if (line.length == 0) return
+        currentLinePosition++
+        lines.push([line.length, currentLinePosition])
+      }).on('close', () => {
+        resolve(lines)
+      })
+    }, reject)
   })
 }
 
@@ -70,30 +55,43 @@ async function readLine(path, targetPosition, cb) {
  * @param {number[]} lines
  */
 async function copyLines(from, to, lines) {
+  const wstream = fs.createWriteStream(to, {
+    flags: 'w+',
+    highWaterMark: STREAM_CAP,
+    encoding: 'utf-8',
+  })
   for (let [_, line] of lines) {
-    await readLine(from, line, (readed, done) => {
-      function close(stream) {
-        stream.end('\n', () => {
-          stream.close()
-        })
-      }
-      const wstream = fs.createWriteStream(to, {
-        flags: 'w+',
-        highWaterMark: STREAM_CAP,
-      })
-      let lastWrited = 0
-      wstream
-        .on('ready', () => {
-          if (!wstream.write(readed)) return
-        })
-        .on('drain', () => {
-          close(wstream)
-        })
-        .on('close', () => {
-          done()
-        })
-    })
+    let status = wstream.write(await readLine(from, line))
+    if (!status) await events.once(wstream, 'drain')
   }
+
+  wstream.close()
+  events.once(wstream, 'close')
+}
+
+//TODO можно побаловаться с offset'ом, чтобы не пробегать каждый раз по всем строкам, а идти по файлу как по массиву(n + смещение)
+//Но для этого вероятно нельзя использовать readline api. Нужно тестировать и писать через обычный поток в режиме паузы
+function readLine(path, targetPosition) {
+  if (!path || typeof path != 'string') throw Error('wrong path')
+  return new Promise((resolve) => {
+    const rstream = fs.createReadStream(path, {
+      encoding: 'utf-8',
+    })
+    const rl = readline.createInterface({ input: rstream, terminal: false })
+    let currentPosition = 1
+    let currentString = null
+
+    rl.on('line', async (line) => {
+      line.trim()
+      if (line.length == 0) return
+      if (currentPosition != targetPosition) return currentPosition++
+      currentString = line
+      rl.close()
+    }).on('close', async () => {
+      rstream.destroy()
+      resolve(currentString + '\n')
+    })
+  })
 }
 
 module.exports = {
