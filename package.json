@@ -6,6 +6,8 @@
   "scripts": {
     "test": "jest",
     "watch": "jest --watchAll",
+    "build": "docker build . -t perceptioncontrol/sorter",
+    "pull": "docker pull perceptioncontrol/sorter",
     "example": "node ./src/generator.js; node ./src/sorter.js"
   }
 }
