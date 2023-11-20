@@ -35,8 +35,22 @@ function Generator(config, cb) {
   }
 
   function update_line() {
-    const channel_cap = wstream.highWaterMark - wstream.writableLength
+    const channel_cap = wstream.writableHighWaterMark - wstream.writableLength
     const file_cap = target_file.totalSize - target_file.writed
+    if (process.env.DEBUG) {
+      console.group('debug')
+      console.log(
+        `Capacity; Channel: ${channel_cap / BYTES_IN_MB}, File: ${
+          file_cap / BYTES_IN_MB
+        }`,
+      )
+      console.log(
+        `Stream; highWaterMarkL ${
+          wstream.writableHighWaterMark / BYTES_IN_MB
+        }; writable length: ${wstream.writableLength / BYTES_IN_MB}`,
+      )
+      console.groupEnd('debug')
+    }
 
     line.data = generateString(min(channel_cap, file_cap))
     line.writed = false
