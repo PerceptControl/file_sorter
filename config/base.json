@@ -1,12 +1,12 @@
 {
   "generator": {
     "name": "generated.txt",
-    "path": "/dist/",
-    "sizeInMb": 50
-  }
+    "path": "/dst/",
+    "sizeInMb": 1024
+  },
   "sorter": {
-    "src": "/dist/generated.txt",
-    "path": "/dist/",
+    "src": "/dst/generated.txt",
+    "path": "/dst/",
     "name": "sorted.txt"
   }
 }
