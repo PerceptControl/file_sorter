@@ -1,23 +1,20 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const events = require('node:events')
-
 const { random, min } = require('./utils/math')
+const { STREAM_CAP } = require('./utils/streams')
 
 const BYTES_IN_MB = 1024 ** 2
-const BYTES_IN_100MB = BYTES_IN_MB * 100
 
 function getString(maxSize) {
   const characters =
     'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
   const buffer = Buffer.alloc(random(1, maxSize))
-  for (let i = 0; i < buffer.byteLength - 2; i++)
-    buffer[i] = characters.charCodeAt(random(0, characters.length - 1))
-  buffer[-2] = '\r'.charCodeAt(0)
-  buffer[-1] = '\n'.charCodeAt(0)
+  for (let i = 0; i < buffer.byteLength - 1; i++)
+    buffer.write(characters[random(0, characters.length - 1)])
+  buffer.write('\n')
 
-  return buffer.toString('utf-8')
+  return buffer
 }
 
 /**
@@ -27,38 +24,63 @@ function getString(maxSize) {
  */
 function generator(config, cb) {
   if (!config) config = require('/config/base.json')
-  if (!config.path) config.path = '/dst'
-  if (!config.name || !config.generator.sizeInMb) throw Error('wrong config')
+  if (!config.generator.path) config.path = '/dst'
+  if (!config.generator.name || !config.generator.sizeInMb)
+    throw Error('wrong config')
 
-  const computedPath = path.join(config.path, config.name)
+  const computedPath = path.join(config.generator.path, config.generator.name)
   const wstream = fs.createWriteStream(computedPath, {
     flags: 'w',
-    highWaterMark: BYTES_IN_100MB,
+    highWaterMark: STREAM_CAP,
     encoding: 'utf-8',
   })
 
-  wstream.on('ready', async () => {
-    let writed = 0
-    let targetFileSize = config.generator.sizeInMb * BYTES_IN_MB
-    while (writed < targetFileSize) {
-      let channelCap = BYTES_IN_100MB - wstream.writableLength
+  const target_file = {
+    totalSize: config.generator.sizeInMb * BYTES_IN_MB,
+    writed: 0,
+  }
+  const line = {
+    data: null,
+    writed: true,
+  }
 
-      let data = getString(min(channelCap, targetFileSize - writed))
-      wstream.cork()
-      wstream.write(data)
-      wstream.uncork()
-      writed += data.length
+  function update_line() {
+    const channel_cap = wstream.highWaterMark - wstream.writableLength
+    const file_cap = target_file.totalSize - target_file.writed
 
-      if (wstream.writableNeedDrain) await events.once(wstream, 'drain')
+    line.data = getString(min(channel_cap, file_cap))
+    line.writed = false
+  }
+
+  function start_writing() {
+    while (target_file.writed < target_file.totalSize) {
+      if (!wstream.writable) return
+      if (line.writed) update_line()
+      console.log(line.data.length, target_file.totalSize)
+      target_file.writed += line.data.length
+      if (!wstream.write(line.data, 'utf-8')) return
+      line.writed = true
     }
+    wstream.end()
+  }
 
-    wstream.end(() => {
-      wstream.close((err) => {
-        console.log(`Writed: ${wstream.bytesWritten}`)
-        if (cb) cb(err, wstream)
-      })
+  wstream
+    .on('ready', () => {
+      console.log('ready')
+      start_writing()
+      if (target_file.writed >= target_file.totalSize) return void wstream.end()
     })
-  })
+    .on('drain', () => {
+      console.log('drain')
+      console.log(line.data.length)
+      line.writed = true
+      if (target_file.writed >= target_file.totalSize) return void wstream.end()
+      start_writing()
+    })
+    .on('error', console.error)
+    .on('close', () => {
+      if (cb) cb(wstream)
+    })
 }
 
 module.exports = generator
@@ -69,3 +91,10 @@ if (process.env.DEBUG) {
   console.log('Abailable RAM: ', require('node:os').freemem() / 1024 ** 2, 'Mb')
   console.log('Total RAM: ', require('node:os').totalmem() / 1024 ** 2, 'Mb')
 }
+
+generator(
+  { generator: { path: 'out', name: 'generated.txt', sizeInMb: 100 } },
+  (stream) => {
+    console.log('written: ', stream.bytesWritten)
+  },
+)
